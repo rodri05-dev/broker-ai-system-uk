@@ -8,6 +8,15 @@ const { createOrUpdateContact } = require('./hubspot');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const APP = process.env.APP_DOMAIN || 'broker-ai-system-2026-8472.vercel.app';
 
+// Skips an action already done for this contact in the last 2 hours (stops duplicate emails/bookings).
+const DUP_WINDOW_MS = 2 * 3600 * 1000;
+async function doneRecently(contactId, activityType) {
+  const since = new Date(Date.now() - DUP_WINDOW_MS).toISOString();
+  const { data } = await supabase.from('producer_activity').select('id')
+    .eq('contact_id', contactId).eq('activity_type', activityType).gte('created_at', since).limit(1);
+  return !!(data && data.length);
+}
+
 async function handleAgentAction({ contactId, intent, data = {} }) {
   try {
     if (intent === 'coi_request')  return await handleCoiRequest({ contactId, data });
@@ -27,6 +36,10 @@ async function handleAgentAction({ contactId, intent, data = {} }) {
 
 async function handleCoiRequest({ contactId, data }) {
   const { data: contact } = await supabase.from('contacts').select('*').eq('id', contactId).single();
+    const dupSince = new Date(Date.now() - DUP_WINDOW_MS).toISOString();
+  const { data: dupCoi } = await supabase.from('coi_requests').select('id')
+    .eq('contact_id', contactId).eq('certificate_holder_name', data.certHolderName).gte('created_at', dupSince).limit(1);
+  if (dupCoi && dupCoi.length) return { ok: true, skipped: 'duplicate_coi' };
 
   const { data: policy } = await supabase.from('policies').select('*')
     .eq('contact_id', contactId).eq('status', 'active')
@@ -90,6 +103,7 @@ Review it here: https://${APP}/api/coi/approve?id=${coiRequest.id}`
 }
 
 async function handleBookMeeting({ contactId, data }) {
+    if (await doneRecently(contactId, 'meeting_booked')) return { ok: true, skipped: 'already_booked' };
   const result = await bookMeeting({
     attendeeName: data.attendeeName,
     attendeeEmail: data.attendeeEmail,
@@ -121,6 +135,7 @@ async function handleBookMeeting({ contactId, data }) {
 }
 
 async function handleQualifyLead({ contactId, data }) {
+    if (await doneRecently(contactId, 'lead_qualified')) return { ok: true, skipped: 'already_qualified' };
   const score = scoreLead(data);
 
   await supabase.from('contacts')
