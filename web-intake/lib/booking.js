@@ -56,7 +56,7 @@ async function bookMeeting({ attendeeName, attendeeEmail, startTimeIso, notes })
         attendee: {
           name: attendeeName,
           email: attendeeEmail,
-          timeZone: process.env.BROKER_TIMEZONE || 'America/New_York'
+          timeZone: process.env.BROKER_TIMEZONE || 'Europe/London'
         },
         metadata: { source: 'ai_agent' },
         bookingFieldsResponses: { notes: notes || '' }
